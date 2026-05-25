@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   release-binaries:
-    if: github.repository == 'avyayv/home-cli'
+    if: github.repository == 'avyayv/personal-automation-cli'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -88,9 +88,9 @@ jobs:
             done
           done
 
-          : > "dist/home-cli_${version}_checksums.txt"
+          : > "dist/personal-automation-cli_${version}_checksums.txt"
           while IFS= read -r file; do
-            sha256sum "dist/${file}" | awk -v name="$file" '{print $1 "  " name}' >> "dist/home-cli_${version}_checksums.txt"
+            sha256sum "dist/${file}" | awk -v name="$file" '{print $1 "  " name}' >> "dist/personal-automation-cli_${version}_checksums.txt"
           done < <(cd dist && find . -maxdepth 1 -type f -name '*.tar.gz' -printf '%f\n' | sort)
 
           cp install.sh dist/install.sh
@@ -101,12 +101,12 @@ jobs:
           Install with:
 
           \`\`\`bash
-          curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- apple-home
-          curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- gree
-          curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- oura
+          curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- apple-home
+          curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- gree
+          curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- oura
           \`\`\`
 
-          Checksums are in \`home-cli_${version}_checksums.txt\`.
+          Checksums are in \`personal-automation-cli_${version}_checksums.txt\`.
           EOF
 
           {
@@ -125,11 +125,11 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
             gh release edit "$TAG" \
-              --title "home-cli ${TAG}" \
+              --title "personal-automation-cli ${TAG}" \
               --notes-file release-notes.md
           else
             gh release create "$TAG" dist/* \
               --target "$GITHUB_SHA" \
-              --title "home-cli ${TAG}" \
+              --title "personal-automation-cli ${TAG}" \
               --notes-file release-notes.md
           fi

@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="avyayv/home-cli"
-app="${HOME_CLI_APP:-${1:-}}"
-version="${HOME_CLI_VERSION:-}"
-install_dir="${HOME_CLI_INSTALL_DIR:-${INSTALL_DIR:-}}"
+repo="avyayv/personal-automation-cli"
+app="${PERSONAL_AUTOMATION_CLI_APP:-${1:-}}"
+version="${PERSONAL_AUTOMATION_CLI_VERSION:-}"
+install_dir="${PERSONAL_AUTOMATION_CLI_INSTALL_DIR:-${INSTALL_DIR:-}}"
 
 usage() {
   cat <<'EOF'
-Install a home-cli binary.
+Install a personal-automation-cli binary.
 
 Usage: install.sh <apple-home|gree|oura>
 
 Environment:
-  HOME_CLI_APP          Binary to install when no argument is provided
-  HOME_CLI_VERSION      Release version or tag to install (default: latest)
-  HOME_CLI_INSTALL_DIR  Install directory (default: /usr/local/bin or ~/.local/bin)
+  PERSONAL_AUTOMATION_CLI_APP          Binary to install when no argument is provided
+  PERSONAL_AUTOMATION_CLI_VERSION      Release version or tag to install (default: latest)
+  PERSONAL_AUTOMATION_CLI_INSTALL_DIR  Install directory (default: /usr/local/bin or ~/.local/bin)
   INSTALL_DIR           Fallback install directory
 EOF
 }
@@ -25,7 +25,7 @@ case "$app" in
   -h|--help) usage; exit 0 ;;
   "") usage >&2; exit 2 ;;
   *)
-    echo "unsupported home-cli binary: $app" >&2
+    echo "unsupported personal-automation-cli binary: $app" >&2
     usage >&2
     exit 2
     ;;
@@ -33,7 +33,7 @@ esac
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "home-cli installer requires '$1'" >&2
+    echo "personal-automation-cli installer requires '$1'" >&2
     exit 1
   fi
 }
@@ -48,7 +48,7 @@ case "$os" in
   darwin) archive_os="macOS" ;;
   linux) archive_os="linux" ;;
   *)
-    echo "unsupported OS for home-cli install: $os" >&2
+    echo "unsupported OS for personal-automation-cli install: $os" >&2
     exit 1
     ;;
 esac
@@ -57,7 +57,7 @@ case "$(uname -m)" in
   x86_64|amd64) arch="x86_64" ;;
   aarch64|arm64) arch="arm64" ;;
   *)
-    echo "unsupported architecture for home-cli install: $(uname -m)" >&2
+    echo "unsupported architecture for personal-automation-cli install: $(uname -m)" >&2
     exit 1
     ;;
 esac
@@ -70,13 +70,13 @@ if [[ "$version" != v* ]]; then
   version="v${version}"
 fi
 if [[ ! "$version" =~ ^v[0-9][0-9A-Za-z._+-]*$ ]]; then
-  echo "could not resolve home-cli release version: $version" >&2
+  echo "could not resolve personal-automation-cli release version: $version" >&2
   exit 1
 fi
 
 archive_version="${version#v}"
 archive="${app}_${archive_version}_${archive_os}_${arch}.tar.gz"
-checksums="home-cli_${archive_version}_checksums.txt"
+checksums="personal-automation-cli_${archive_version}_checksums.txt"
 base_url="https://github.com/${repo}/releases/download/${version}"
 
 tmpdir="$(mktemp -d)"
@@ -95,7 +95,7 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
   actual="$(shasum -a 256 "${tmpdir}/${archive}" | awk '{print $1}')"
 else
-  echo "home-cli installer requires 'sha256sum' or 'shasum' to verify downloads" >&2
+  echo "personal-automation-cli installer requires 'sha256sum' or 'shasum' to verify downloads" >&2
   exit 1
 fi
 actual_lower="$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')"

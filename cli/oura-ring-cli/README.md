@@ -5,16 +5,16 @@ Standalone Go command-line interface for the Oura Ring API. The binary is named 
 ## Install
 
 ```bash
-curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- oura
+curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- oura
 ```
 
-Set `HOME_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `HOME_CLI_VERSION` to install a specific release.
+Set `PERSONAL_AUTOMATION_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `PERSONAL_AUTOMATION_CLI_VERSION` to install a specific release.
 
 From source:
 
 ```bash
-git clone https://github.com/avyayv/home-cli
-cd home-cli/cli/oura-ring-cli
+git clone https://github.com/avyayv/personal-automation-cli
+cd personal-automation-cli/cli/oura-ring-cli
 go build -o ~/.local/bin/oura .
 ```
 
@@ -74,7 +74,7 @@ oura get /v2/usercollection/workout --param start_date=2026-05-01 --param end_da
 oura update
 ```
 
-`oura update` fetches the latest source from `github.com/avyayv/home-cli`, rebuilds this CLI, and replaces the installed `oura` binary. Pass an explicit target path if needed: `oura update ~/.local/bin/oura`.
+`oura update` fetches the latest source from `github.com/avyayv/personal-automation-cli`, rebuilds this CLI, and replaces the installed `oura` binary. Pass an explicit target path if needed: `oura update ~/.local/bin/oura`.
 
 ## Local development
 

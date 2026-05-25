@@ -23,7 +23,7 @@ import (
 
 const (
 	apiBaseURL          = "https://api.ouraring.com"
-	defaultUpdateSource = "https://github.com/avyayv/home-cli.git"
+	defaultUpdateSource = "https://github.com/avyayv/personal-automation-cli.git"
 	redactedToken       = "********"
 )
 

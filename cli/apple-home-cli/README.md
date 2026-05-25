@@ -5,16 +5,16 @@ Go CLI/package for Apple Home inventory and generic control backends.
 ## Install
 
 ```bash
-curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- apple-home
+curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- apple-home
 apple-home doctor
 ```
 
-Set `HOME_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `HOME_CLI_VERSION` to install a specific release.
+Set `PERSONAL_AUTOMATION_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `PERSONAL_AUTOMATION_CLI_VERSION` to install a specific release.
 
 From source:
 
 ```bash
-cd /Users/avyay/code/cli/home-cli/cli/apple-home-cli
+cd /Users/avyay/code/cli/personal-automation-cli/cli/apple-home-cli
 GOBIN=$HOME/.local/bin go install ./cmd/apple-home
 ```
 
@@ -54,7 +54,7 @@ apple-home scene "Good Night" --backend shortcuts
 Importable package:
 
 ```go
-import "github.com/avyayv/home-cli/cli/apple-home-cli/pkg/applehome"
+import "github.com/avyayv/personal-automation-cli/cli/apple-home-cli/pkg/applehome"
 ```
 
 Useful entry points:

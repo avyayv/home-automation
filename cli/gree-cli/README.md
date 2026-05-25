@@ -5,16 +5,16 @@ Standalone Go command-line interface for discovering and controlling GREE HVAC u
 ## Install
 
 ```bash
-curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- gree
+curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- gree
 ```
 
-Set `HOME_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `HOME_CLI_VERSION` to install a specific release.
+Set `PERSONAL_AUTOMATION_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `PERSONAL_AUTOMATION_CLI_VERSION` to install a specific release.
 
 From source:
 
 ```bash
-git clone https://github.com/avyayv/home-cli
-cd home-cli/cli/gree-cli
+git clone https://github.com/avyayv/personal-automation-cli
+cd personal-automation-cli/cli/gree-cli
 go build -o ~/.local/bin/gree .
 ```
 
@@ -24,7 +24,7 @@ go build -o ~/.local/bin/gree .
 gree update
 ```
 
-`gree update` fetches the latest source from `github.com/avyayv/home-cli`, rebuilds this CLI, and replaces the installed `gree` binary. Pass an explicit target path if needed: `gree update ~/.local/bin/gree`.
+`gree update` fetches the latest source from `github.com/avyayv/personal-automation-cli`, rebuilds this CLI, and replaces the installed `gree` binary. Pass an explicit target path if needed: `gree update ~/.local/bin/gree`.
 
 ## Configuration
 

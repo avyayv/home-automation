@@ -1,6 +1,6 @@
-# Home CLI
+# Personal Automation CLI
 
-Collection of standalone home command-line tools.
+Collection of standalone personal automation command-line tools.
 
 ## CLIs
 
@@ -11,23 +11,23 @@ Collection of standalone home command-line tools.
 ## Install Apple Home CLI
 
 ```bash
-curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- apple-home
+curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- apple-home
 apple-home doctor
 ```
 
 ## Install GREE CLI
 
 ```bash
-curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- gree
+curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- gree
 ```
 
 ## Install Oura Ring CLI
 
 ```bash
-curl -fsSL https://github.com/avyayv/home-cli/releases/latest/download/install.sh | bash -s -- oura
+curl -fsSL https://github.com/avyayv/personal-automation-cli/releases/latest/download/install.sh | bash -s -- oura
 ```
 
-Set `HOME_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `HOME_CLI_VERSION` to install a specific release.
+Set `PERSONAL_AUTOMATION_CLI_INSTALL_DIR` or `INSTALL_DIR` to choose a different install directory, and set `PERSONAL_AUTOMATION_CLI_VERSION` to install a specific release.
 
 Create an Oura personal access token at https://cloud.ouraring.com/personal-access-tokens, then set `OURA_TOKEN` or run `oura config set-token <token>`.
 

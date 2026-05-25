@@ -30,7 +30,7 @@ import (
 const (
 	devicePort          = 7000
 	defaultScanWait     = 2 * time.Second
-	defaultUpdateSource = "https://github.com/avyayv/home-cli.git"
+	defaultUpdateSource = "https://github.com/avyayv/personal-automation-cli.git"
 )
 
 var (

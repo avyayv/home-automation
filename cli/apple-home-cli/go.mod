@@ -1,4 +1,4 @@
-module github.com/avyayv/home-cli/cli/apple-home-cli
+module github.com/avyayv/personal-automation-cli/cli/apple-home-cli
 
 go 1.26
 

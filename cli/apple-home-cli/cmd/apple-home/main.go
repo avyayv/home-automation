@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/avyayv/home-cli/cli/apple-home-cli/pkg/applehome"
+	"github.com/avyayv/personal-automation-cli/cli/apple-home-cli/pkg/applehome"
 )
 
 func fatal(err any) {
