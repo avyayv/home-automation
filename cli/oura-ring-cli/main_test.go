@@ -154,6 +154,147 @@ func TestHeartrateDefaultsToLast24Hours(t *testing.T) {
 	}
 }
 
+func TestSleepSummaryOmitsHighFrequencyFields(t *testing.T) {
+	t.Setenv("OURA_TOKEN", "env-token")
+	store := testStore(t)
+	client := &fakeOuraClient{payload: map[string]any{
+		"data": []any{map[string]any{
+			"id":                   "sleep-id",
+			"day":                  "2026-05-01",
+			"type":                 "long_sleep",
+			"total_sleep_duration": 28800,
+			"heart_rate":           map[string]any{"items": []any{50, 51, 52}},
+			"hrv":                  map[string]any{"items": []any{90, 91, 92}},
+			"movement_30_sec":      "1111111111",
+			"sleep_phase_30_sec":   "2222222222",
+		}},
+	}}
+
+	payload, code, err := runTestCLI(t, []string{"sleep", "--days", "7"}, client, store)
+	if err != nil || code != 0 {
+		t.Fatalf("sleep code=%d err=%v", code, err)
+	}
+	summary := payload.(anyMap)
+	items := summary["data"].([]any)
+	item := items[0].(anyMap)
+	if item["total_sleep_min"] != 480 {
+		t.Fatalf("total_sleep_min=%#v", item["total_sleep_min"])
+	}
+	for _, field := range []string{"id", "heart_rate", "hrv", "movement_30_sec", "sleep_phase_30_sec"} {
+		if _, ok := item[field]; ok {
+			t.Fatalf("summary should omit %q: %#v", field, item)
+		}
+	}
+}
+
+func TestRawFlagKeepsFullCollectionPayload(t *testing.T) {
+	t.Setenv("OURA_TOKEN", "env-token")
+	store := testStore(t)
+	raw := map[string]any{"data": []any{map[string]any{"day": "2026-05-01", "heart_rate": []any{1, 2, 3}}}}
+	client := &fakeOuraClient{payload: raw}
+
+	payload, code, err := runTestCLI(t, []string{"sleep", "--raw"}, client, store)
+	if err != nil || code != 0 {
+		t.Fatalf("sleep --raw code=%d err=%v", code, err)
+	}
+	if !reflect.DeepEqual(payload, raw) {
+		t.Fatalf("raw payload changed: %#v", payload)
+	}
+}
+
+func TestHeartrateSummaryBucketsSamplesByHour(t *testing.T) {
+	t.Setenv("OURA_TOKEN", "env-token")
+	store := testStore(t)
+	client := &fakeOuraClient{payload: map[string]any{
+		"data": []any{
+			map[string]any{"timestamp": "2026-05-01T01:00:00Z", "bpm": 50},
+			map[string]any{"timestamp": "2026-05-01T01:30:00Z", "bpm": 70},
+			map[string]any{"timestamp": "2026-05-01T02:00:00Z", "bpm": 80},
+		},
+	}}
+
+	payload, code, err := runTestCLI(t, []string{"heartrate"}, client, store)
+	if err != nil || code != 0 {
+		t.Fatalf("heartrate code=%d err=%v", code, err)
+	}
+	summary := payload.(anyMap)
+	if summary["sample_count"] != 3 {
+		t.Fatalf("sample_count=%#v", summary["sample_count"])
+	}
+	buckets := summary["data"].([]any)
+	if len(buckets) != 2 {
+		t.Fatalf("buckets=%#v", buckets)
+	}
+	first := buckets[0].(anyMap)
+	if first["samples"] != 2 || first["avg_bpm"] != 60.0 || first["min_bpm"] != 50.0 || first["max_bpm"] != 70.0 {
+		t.Fatalf("first bucket=%#v", first)
+	}
+}
+
+func TestSelectGlobalFlagProjectsNestedFields(t *testing.T) {
+	t.Setenv("OURA_TOKEN", "env-token")
+	store := testStore(t)
+	client := &fakeOuraClient{payload: map[string]any{"data": []any{map[string]any{
+		"day":                  "2026-05-01",
+		"total_sleep_duration": 28800,
+		"heart_rate":           []any{1, 2, 3},
+	}}}}
+
+	payload, code, err := runTestCLI(t, []string{"sleep", "--days", "7", "--select", "data.day,data.total_sleep_min"}, client, store)
+	if err != nil || code != 0 {
+		t.Fatalf("sleep --select code=%d err=%v", code, err)
+	}
+	selected := payload.(anyMap)
+	items := selected["data"].([]any)
+	item := items[0].(anyMap)
+	if item["day"] != "2026-05-01" || item["total_sleep_min"] != 480 {
+		t.Fatalf("selected item=%#v", item)
+	}
+	if _, ok := item["heart_rate"]; ok {
+		t.Fatalf("select should omit heart_rate: %#v", item)
+	}
+}
+
+func TestDoctorReportsConfiguredAuthWithoutLeakingProfile(t *testing.T) {
+	t.Setenv("OURA_TOKEN", "env-token")
+	store := testStore(t)
+	client := &fakeOuraClient{payload: anyMap{"email": "private@example.com"}}
+
+	payload, code, err := runTestCLI(t, []string{"doctor"}, client, store)
+	if err != nil || code != 0 {
+		t.Fatalf("doctor code=%d err=%v", code, err)
+	}
+	diag := payload.(anyMap)
+	if diag["ok"] != true {
+		t.Fatalf("doctor ok=%#v payload=%#v", diag["ok"], diag)
+	}
+	api := diag["api"].(anyMap)
+	if api["ok"] != true || client.path != "/v2/usercollection/personal_info" {
+		t.Fatalf("api=%#v path=%q", api, client.path)
+	}
+	if _, leaked := diag["email"]; leaked {
+		t.Fatalf("doctor leaked profile payload: %#v", diag)
+	}
+}
+
+func TestDoctorWithoutTokenReturnsHint(t *testing.T) {
+	t.Setenv("OURA_TOKEN", "")
+	store := testStore(t)
+	client := &fakeOuraClient{}
+
+	payload, code, err := runTestCLI(t, []string{"doctor"}, client, store)
+	if err != nil || code != 0 {
+		t.Fatalf("doctor code=%d err=%v", code, err)
+	}
+	diag := payload.(anyMap)
+	if diag["ok"] != false || diag["hint"] == "" {
+		t.Fatalf("doctor payload=%#v", diag)
+	}
+	if client.path != "" {
+		t.Fatalf("API should not have been called, got path %q", client.path)
+	}
+}
+
 func TestGenericGetNormalizesPathAndParams(t *testing.T) {
 	t.Setenv("OURA_TOKEN", "env-token")
 	store := testStore(t)

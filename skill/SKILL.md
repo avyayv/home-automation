@@ -46,6 +46,7 @@ Useful commands:
 
 ```bash
 oura personal-info
+oura doctor
 oura ring-configuration
 oura daily-activity
 oura daily-readiness
@@ -62,6 +63,15 @@ Common date options:
 oura daily-sleep --days 14
 oura daily-readiness --start-date 2026-05-01 --end-date 2026-05-06
 oura heartrate --start-datetime 2026-05-06T00:00:00Z --end-datetime 2026-05-06T12:00:00Z
+```
+
+Oura collection commands return concise JSON summaries by default. Prefer `--select` for very narrow answers, and use `--raw` only when the full API payload is needed, because raw `sleep`, `daily-activity`, and `heartrate` include large per-sample arrays:
+
+```bash
+oura sleep --days 7 --select data.day,data.total_sleep_min,data.efficiency
+oura sleep --days 7 --raw
+oura daily-activity --days 7 --raw
+oura heartrate --raw
 ```
 
 Fallback for unsupported Oura endpoints:

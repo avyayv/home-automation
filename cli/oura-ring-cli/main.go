@@ -7,9 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,14 +38,17 @@ func (e codedError) Error() string { return e.err.Error() }
 func (e codedError) Unwrap() error { return e.err }
 
 func main() {
-	flag.Usage = usage
-	flag.Parse()
-	if flag.NArg() < 1 {
+	args := os.Args[1:]
+	if len(args) < 1 {
 		usage()
 		os.Exit(2)
 	}
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		usage()
+		return
+	}
 
-	payload, code, err := runCLI(flag.Args(), NewOuraClient(apiBaseURL), NewConfigStore(defaultConfigPath()), time.Now)
+	payload, opts, code, err := runCLIWithOptions(args, NewOuraClient(apiBaseURL), NewConfigStore(defaultConfigPath()), time.Now)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		if ce, ok := err.(codedError); ok {
@@ -53,7 +56,7 @@ func main() {
 		}
 		os.Exit(code)
 	}
-	printJSON(payload)
+	printJSON(payload, opts.Pretty)
 }
 
 func usage() {
@@ -63,6 +66,7 @@ Usage: oura <command> [args]
 
 Commands:
   personal-info                         Show account profile details
+  doctor                                Check config, auth, and API reachability without exposing data
   ring-configuration                    Show ring configuration records
   daily-activity [date flags]           Fetch daily activity records
   daily-readiness [date flags]          Fetch daily readiness records
@@ -71,7 +75,7 @@ Commands:
   daily-spo2 [date flags]               Fetch daily SpO2 records
   sleep [date flags]                    Fetch sleep period records
   heartrate [datetime flags]            Fetch heart-rate samples
-  get <path> [--param key=value]         Call an Oura API path directly
+  get <path> [--param key=value] [--raw] Call an Oura API path directly
   config init                           Create the config file
   config show                           Show config values (token redacted)
   config set-token <token>              Save a personal access token
@@ -82,20 +86,53 @@ Date flags:
   --start-date YYYY-MM-DD               Start date for daily/sleep endpoints
   --end-date YYYY-MM-DD                 End date for daily/sleep endpoints
   --days N                              Default date window size (default: 7)
+  --raw                                 Return the full API response instead of a concise summary
 
 Datetime flags:
   --start-datetime RFC3339              Start timestamp for heartrate
   --end-datetime RFC3339                End timestamp for heartrate
+  --raw                                 Return the full API response instead of a concise summary
+
+Global flags:
+  --select a,b.c                        Return only selected JSON fields (repeat or comma-separate)
+  --output json|pretty                  Output compact JSON (default) or indented JSON
+  --pretty                              Alias for --output pretty
 
 Authentication:
   Set OURA_TOKEN or run: oura config set-token <personal-access-token>
   Create a token at https://cloud.ouraring.com/personal-access-tokens
 
-All command output is JSON. Set OURA_CONFIG to override the config path.
+Collection commands return compact summary JSON by default. Add --raw for full API responses.
+Set OURA_CONFIG to override the config path.
 `)
 }
 
+type cliOptions struct {
+	Pretty bool
+	Select []string
+}
+
 func runCLI(args []string, client OuraGetter, store ConfigStore, now func() time.Time) (any, int, error) {
+	payload, _, code, err := runCLIWithOptions(args, client, store, now)
+	return payload, code, err
+}
+
+func runCLIWithOptions(args []string, client OuraGetter, store ConfigStore, now func() time.Time) (any, cliOptions, int, error) {
+	opts, cleanArgs, err := parseGlobalArgs(args)
+	if err != nil {
+		return nil, opts, 1, err
+	}
+	payload, code, err := runCoreCLI(cleanArgs, client, store, now)
+	if err != nil || len(opts.Select) == 0 {
+		return payload, opts, code, err
+	}
+	return selectPayloadFields(payload, opts.Select), opts, code, nil
+}
+
+func runCoreCLI(args []string, client OuraGetter, store ConfigStore, now func() time.Time) (any, int, error) {
+	if len(args) < 1 {
+		return nil, 2, errors.New("missing command")
+	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "personal-info", "profile", "me":
@@ -103,6 +140,11 @@ func runCLI(args []string, client OuraGetter, store ConfigStore, now func() time
 			return nil, 1, fmt.Errorf("usage: oura %s", cmd)
 		}
 		return getAuthorized(client, store, "/v2/usercollection/personal_info", nil)
+	case "doctor":
+		if len(rest) != 0 {
+			return nil, 1, errors.New("usage: oura doctor")
+		}
+		return handleDoctor(client, store)
 	case "ring-configuration", "rings":
 		if len(rest) != 0 {
 			return nil, 1, fmt.Errorf("usage: oura %s", cmd)
@@ -137,6 +179,52 @@ func runCLI(args []string, client OuraGetter, store ConfigStore, now func() time
 	}
 }
 
+func parseGlobalArgs(args []string) (cliOptions, []string, error) {
+	var opts cliOptions
+	clean := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		name, value, hasValue := strings.Cut(arg, "=")
+		switch name {
+		case "--pretty":
+			opts.Pretty = true
+		case "--output":
+			if !hasValue {
+				i++
+				if i >= len(args) {
+					return opts, nil, errors.New("--output requires json or pretty")
+				}
+				value = args[i]
+			}
+			switch value {
+			case "json", "compact":
+				opts.Pretty = false
+			case "pretty":
+				opts.Pretty = true
+			default:
+				return opts, nil, fmt.Errorf("--output must be json or pretty, got %q", value)
+			}
+		case "--select":
+			if !hasValue {
+				i++
+				if i >= len(args) {
+					return opts, nil, errors.New("--select requires a comma-separated field list")
+				}
+				value = args[i]
+			}
+			for _, field := range strings.Split(value, ",") {
+				field = strings.TrimSpace(field)
+				if field != "" {
+					opts.Select = append(opts.Select, field)
+				}
+			}
+		default:
+			clean = append(clean, arg)
+		}
+	}
+	return opts, clean, nil
+}
+
 func getAuthorized(client OuraGetter, store ConfigStore, path string, params map[string]string) (any, int, error) {
 	config, err := store.Load()
 	if err != nil {
@@ -157,6 +245,61 @@ func getAuthorized(client OuraGetter, store ConfigStore, path string, params map
 	return payload, 0, nil
 }
 
+func handleDoctor(client OuraGetter, store ConfigStore) (any, int, error) {
+	config, err := store.Load()
+	if err != nil {
+		return nil, 1, err
+	}
+	envTokenSet := strings.TrimSpace(os.Getenv("OURA_TOKEN")) != ""
+	configTokenSet := strings.TrimSpace(config.AccessToken) != ""
+	token := effectiveAccessToken(config)
+	out := anyMap{
+		"ok": false,
+		"config": anyMap{
+			"path":   store.Path(),
+			"exists": store.Exists(),
+		},
+		"auth": anyMap{
+			"env_token_set":    envTokenSet,
+			"config_token_set": configTokenSet,
+			"effective_source": tokenSource(envTokenSet, configTokenSet),
+		},
+		"api": anyMap{"checked": false},
+	}
+	if token == "" {
+		out["hint"] = "Set OURA_TOKEN or run `oura config set-token <personal-access-token>`"
+		return out, 0, nil
+	}
+	_, err = client.Get(context.Background(), "/v2/usercollection/personal_info", nil, token)
+	api := anyMap{"checked": true, "ok": err == nil}
+	if err != nil {
+		api["error"] = err.Error()
+		var apiErr APIError
+		if errors.As(err, &apiErr) {
+			api["status_code"] = apiErr.StatusCode
+			if apiErr.StatusCode == http.StatusUnauthorized {
+				api["hint"] = "Oura rejected the token; create a fresh token at https://cloud.ouraring.com/personal-access-tokens"
+			}
+		}
+		out["api"] = api
+		return out, 0, nil
+	}
+	out["ok"] = true
+	out["api"] = api
+	return out, 0, nil
+}
+
+func tokenSource(envTokenSet, configTokenSet bool) string {
+	switch {
+	case envTokenSet:
+		return "env:OURA_TOKEN"
+	case configTokenSet:
+		return "config"
+	default:
+		return "none"
+	}
+}
+
 func handleDateCollection(args []string, client OuraGetter, store ConfigStore, now func() time.Time, path string) (any, int, error) {
 	opts, positionals, err := parseDateArgs(args)
 	if err != nil {
@@ -169,7 +312,11 @@ func handleDateCollection(args []string, client OuraGetter, store ConfigStore, n
 	if err != nil {
 		return nil, 1, err
 	}
-	return getAuthorized(client, store, path, params)
+	payload, code, err := getAuthorized(client, store, path, params)
+	if err != nil || opts.Raw {
+		return payload, code, err
+	}
+	return summarizeOuraPayload(path, params, payload), code, nil
 }
 
 func handleDatetimeCollection(args []string, client OuraGetter, store ConfigStore, now func() time.Time, path string) (any, int, error) {
@@ -184,7 +331,11 @@ func handleDatetimeCollection(args []string, client OuraGetter, store ConfigStor
 	if err != nil {
 		return nil, 1, err
 	}
-	return getAuthorized(client, store, path, params)
+	payload, code, err := getAuthorized(client, store, path, params)
+	if err != nil || opts.Raw {
+		return payload, code, err
+	}
+	return summarizeOuraPayload(path, params, payload), code, nil
 }
 
 func handleGet(args []string, client OuraGetter, store ConfigStore) (any, int, error) {
@@ -193,9 +344,14 @@ func handleGet(args []string, client OuraGetter, store ConfigStore) (any, int, e
 	}
 	path := normalizeAPIPath(args[0])
 	params := map[string]string{}
+	raw := false
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		name, value, hasValue := strings.Cut(arg, "=")
+		if name == "--raw" {
+			raw = true
+			continue
+		}
 		if name != "--param" {
 			return nil, 1, fmt.Errorf("unknown flag %q", arg)
 		}
@@ -212,7 +368,11 @@ func handleGet(args []string, client OuraGetter, store ConfigStore) (any, int, e
 		}
 		params[key] = val
 	}
-	return getAuthorized(client, store, path, params)
+	payload, code, err := getAuthorized(client, store, path, params)
+	if err != nil || raw {
+		return payload, code, err
+	}
+	return summarizeOuraPayload(path, params, payload), code, nil
 }
 
 func normalizeAPIPath(path string) string {
@@ -298,6 +458,7 @@ type dateOptions struct {
 	StartDate string
 	EndDate   string
 	Days      int
+	Raw       bool
 }
 
 func parseDateArgs(args []string) (dateOptions, []string, error) {
@@ -338,6 +499,8 @@ func parseDateArgs(args []string) (dateOptions, []string, error) {
 				return opts, nil, errors.New("--days must be a positive integer")
 			}
 			opts.Days = days
+		case "--raw":
+			opts.Raw = true
 		default:
 			if strings.HasPrefix(arg, "--") {
 				return opts, nil, fmt.Errorf("unknown flag %q", arg)
@@ -388,6 +551,7 @@ func parseDate(value string) (time.Time, error) {
 type datetimeOptions struct {
 	StartDateTime string
 	EndDateTime   string
+	Raw           bool
 }
 
 func parseDatetimeArgs(args []string) (datetimeOptions, []string, error) {
@@ -415,6 +579,8 @@ func parseDatetimeArgs(args []string) (datetimeOptions, []string, error) {
 				value = args[i]
 			}
 			opts.EndDateTime = value
+		case "--raw":
+			opts.Raw = true
 		default:
 			if strings.HasPrefix(arg, "--") {
 				return opts, nil, fmt.Errorf("unknown flag %q", arg)
@@ -447,9 +613,395 @@ func datetimeParams(opts datetimeOptions, now time.Time) (map[string]string, err
 	return map[string]string{"start_datetime": start.UTC().Format(time.RFC3339), "end_datetime": end.UTC().Format(time.RFC3339)}, nil
 }
 
-func printJSON(v any) {
+func summarizeOuraPayload(path string, params map[string]string, payload any) any {
+	data, nextToken, ok := collectionData(payload)
+	if !ok {
+		return payload
+	}
+
+	endpoint := collectionName(path)
+	out := anyMap{"endpoint": endpoint, "count": len(data)}
+	if len(params) != 0 {
+		out["params"] = params
+	}
+	if nextToken != nil {
+		out["next_token"] = nextToken
+	}
+
+	switch endpoint {
+	case "sleep":
+		out["raw_omitted"] = "id,ring,algo,heart_rate,hrv,movement_30_sec,sleep_phase_*; use --raw"
+		out["data"] = mapItems(data, summarizeSleepPeriod)
+	case "daily_activity":
+		out["raw_omitted"] = "id,timestamp,met,class_5_min; use --raw"
+		out["data"] = mapItems(data, summarizeDailyActivity)
+	case "heartrate":
+		return summarizeHeartRate(endpoint, params, data, nextToken)
+	case "daily_sleep":
+		out["raw_omitted"] = "id,timestamp; use --raw"
+		out["data"] = mapItems(data, summarizeDailySleep)
+	case "daily_readiness":
+		out["raw_omitted"] = "id,timestamp; use --raw"
+		out["data"] = mapItems(data, summarizeDailyReadiness)
+	case "daily_spo2":
+		out["raw_omitted"] = "id; use --raw"
+		out["data"] = mapItems(data, summarizeDailySpO2)
+	case "daily_stress":
+		out["raw_omitted"] = "id; use --raw"
+		out["data"] = mapItems(data, summarizeDailyStress)
+	default:
+		out["data"] = data
+	}
+	return out
+}
+
+func collectionData(payload any) ([]any, any, bool) {
+	m, ok := asAnyMap(payload)
+	if !ok {
+		return nil, nil, false
+	}
+	rawData, ok := m["data"]
+	if !ok {
+		return nil, nil, false
+	}
+	data, ok := rawData.([]any)
+	if !ok {
+		return nil, nil, false
+	}
+	return data, m["next_token"], true
+}
+
+func collectionName(path string) string {
+	path = normalizeAPIPath(path)
+	return strings.TrimPrefix(path, "/v2/usercollection/")
+}
+
+func mapItems(data []any, summarize func(anyMap) anyMap) []any {
+	items := make([]any, 0, len(data))
+	for _, raw := range data {
+		m, ok := asAnyMap(raw)
+		if !ok {
+			items = append(items, raw)
+			continue
+		}
+		items = append(items, summarize(m))
+	}
+	return items
+}
+
+func summarizeSleepPeriod(m anyMap) anyMap {
+	out := anyMap{}
+	copyFields(out, m, "day", "type", "bedtime_start", "bedtime_end", "efficiency", "average_heart_rate", "lowest_heart_rate", "average_hrv", "average_breath", "restless_periods", "sleep_score_delta", "readiness_score_delta")
+	copyDurationMinutes(out, m, "total_sleep_min", "total_sleep_duration")
+	copyDurationMinutes(out, m, "time_in_bed_min", "time_in_bed")
+	copyDurationMinutes(out, m, "awake_min", "awake_time")
+	copyDurationMinutes(out, m, "rem_min", "rem_sleep_duration")
+	copyDurationMinutes(out, m, "deep_min", "deep_sleep_duration")
+	copyDurationMinutes(out, m, "light_min", "light_sleep_duration")
+	copyDurationMinutes(out, m, "latency_min", "latency")
+	if readiness, ok := asAnyMap(m["readiness"]); ok {
+		copyFieldAs(out, readiness, "readiness_score", "score")
+		copyFieldAs(out, readiness, "temperature_deviation", "temperature_deviation")
+	}
+	return out
+}
+
+func summarizeDailyActivity(m anyMap) anyMap {
+	out := anyMap{}
+	copyFields(out, m, "day", "score", "steps", "active_calories", "total_calories", "target_calories", "equivalent_walking_distance", "meters_to_target", "target_meters", "average_met_minutes", "inactivity_alerts")
+	copyDurationMinutes(out, m, "high_activity_min", "high_activity_time")
+	copyDurationMinutes(out, m, "medium_activity_min", "medium_activity_time")
+	copyDurationMinutes(out, m, "low_activity_min", "low_activity_time")
+	copyDurationMinutes(out, m, "sedentary_min", "sedentary_time")
+	copyDurationMinutes(out, m, "resting_min", "resting_time")
+	copyDurationMinutes(out, m, "non_wear_min", "non_wear_time")
+	copyField(out, m, "contributors")
+	return out
+}
+
+func summarizeDailySleep(m anyMap) anyMap {
+	out := anyMap{}
+	copyFields(out, m, "day", "score", "contributors")
+	return out
+}
+
+func summarizeDailyReadiness(m anyMap) anyMap {
+	out := anyMap{}
+	copyFields(out, m, "day", "score", "temperature_deviation", "temperature_trend_deviation", "contributors")
+	return out
+}
+
+func summarizeDailySpO2(m anyMap) anyMap {
+	out := anyMap{}
+	copyFields(out, m, "day", "spo2_percentage", "breathing_disturbance_index")
+	return out
+}
+
+func summarizeDailyStress(m anyMap) anyMap {
+	out := anyMap{}
+	copyFields(out, m, "day", "stress_high", "recovery_high", "day_summary")
+	return out
+}
+
+func summarizeHeartRate(endpoint string, params map[string]string, data []any, nextToken any) anyMap {
+	bucketsByHour := map[time.Time]*heartRateBucket{}
+	var first, last time.Time
+	sampleCount := 0
+	for _, raw := range data {
+		m, ok := asAnyMap(raw)
+		if !ok {
+			continue
+		}
+		bpm, ok := numberAsFloat(m["bpm"])
+		if !ok {
+			continue
+		}
+		timestamp, ok := stringValue(m["timestamp"])
+		if !ok {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339Nano, timestamp)
+		if err != nil {
+			continue
+		}
+		t = t.UTC()
+		if sampleCount == 0 || t.Before(first) {
+			first = t
+		}
+		if sampleCount == 0 || t.After(last) {
+			last = t
+		}
+		sampleCount++
+		hour := t.Truncate(time.Hour)
+		bucket := bucketsByHour[hour]
+		if bucket == nil {
+			bucket = &heartRateBucket{Min: bpm, Max: bpm}
+			bucketsByHour[hour] = bucket
+		}
+		bucket.Count++
+		bucket.Sum += bpm
+		if bpm < bucket.Min {
+			bucket.Min = bpm
+		}
+		if bpm > bucket.Max {
+			bucket.Max = bpm
+		}
+	}
+
+	hours := make([]time.Time, 0, len(bucketsByHour))
+	for hour := range bucketsByHour {
+		hours = append(hours, hour)
+	}
+	sort.Slice(hours, func(i, j int) bool { return hours[i].Before(hours[j]) })
+	buckets := make([]any, 0, len(hours))
+	for _, hour := range hours {
+		bucket := bucketsByHour[hour]
+		buckets = append(buckets, anyMap{
+			"hour":    hour.Format(time.RFC3339),
+			"samples": bucket.Count,
+			"avg_bpm": round1(bucket.Sum / float64(bucket.Count)),
+			"min_bpm": round1(bucket.Min),
+			"max_bpm": round1(bucket.Max),
+		})
+	}
+
+	out := anyMap{"endpoint": endpoint, "sample_count": sampleCount, "bucket_minutes": 60, "data": buckets, "raw_omitted": "samples,producer_timestamp; use --raw"}
+	if len(params) != 0 {
+		out["params"] = params
+	}
+	if sampleCount != 0 {
+		out["start_datetime"] = first.Format(time.RFC3339)
+		out["end_datetime"] = last.Format(time.RFC3339)
+	}
+	if nextToken != nil {
+		out["next_token"] = nextToken
+	}
+	return out
+}
+
+type heartRateBucket struct {
+	Count int
+	Sum   float64
+	Min   float64
+	Max   float64
+}
+
+func asAnyMap(value any) (anyMap, bool) {
+	switch v := value.(type) {
+	case anyMap:
+		return v, true
+	case map[string]any:
+		return anyMap(v), true
+	default:
+		return nil, false
+	}
+}
+
+func copyFields(dst, src anyMap, fields ...string) {
+	for _, field := range fields {
+		copyField(dst, src, field)
+	}
+}
+
+func copyField(dst, src anyMap, field string) {
+	copyFieldAs(dst, src, field, field)
+}
+
+func copyFieldAs(dst, src anyMap, outKey, inKey string) {
+	value, ok := src[inKey]
+	if !ok || value == nil {
+		return
+	}
+	dst[outKey] = value
+}
+
+func copyDurationMinutes(dst, src anyMap, outKey, inKey string) {
+	seconds, ok := numberAsFloat(src[inKey])
+	if !ok {
+		return
+	}
+	dst[outKey] = int(math.Round(seconds / 60))
+}
+
+func numberAsFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case json.Number:
+		f, err := v.Float64()
+		return f, err == nil
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	default:
+		return 0, false
+	}
+}
+
+func stringValue(value any) (string, bool) {
+	v, ok := value.(string)
+	return v, ok && v != ""
+}
+
+func round1(value float64) float64 {
+	return math.Round(value*10) / 10
+}
+
+func selectPayloadFields(payload any, fields []string) any {
+	var out any = anyMap{}
+	matched := false
+	for _, field := range fields {
+		parts := splitSelectField(field)
+		if len(parts) == 0 {
+			continue
+		}
+		projected, ok := projectField(payload, parts)
+		if !ok {
+			continue
+		}
+		out = mergeProjected(out, projected)
+		matched = true
+	}
+	if !matched {
+		return anyMap{"selected": fields, "data": []any{}}
+	}
+	return out
+}
+
+func splitSelectField(field string) []string {
+	rawParts := strings.Split(field, ".")
+	parts := make([]string, 0, len(rawParts))
+	for _, part := range rawParts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func projectField(value any, parts []string) (any, bool) {
+	if len(parts) == 0 {
+		return value, true
+	}
+	if m, ok := asAnyMap(value); ok {
+		child, exists := m[parts[0]]
+		if !exists {
+			return nil, false
+		}
+		projected, ok := projectField(child, parts[1:])
+		if !ok {
+			return nil, false
+		}
+		return anyMap{parts[0]: projected}, true
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]any, len(items))
+	matched := false
+	for i, item := range items {
+		projected, ok := projectField(item, parts)
+		if ok {
+			out[i] = projected
+			matched = true
+		} else {
+			out[i] = anyMap{}
+		}
+	}
+	return out, matched
+}
+
+func mergeProjected(dst, src any) any {
+	dstMap, dstIsMap := asAnyMap(dst)
+	srcMap, srcIsMap := asAnyMap(src)
+	if dstIsMap && srcIsMap {
+		for key, srcValue := range srcMap {
+			if dstValue, ok := dstMap[key]; ok {
+				dstMap[key] = mergeProjected(dstValue, srcValue)
+			} else {
+				dstMap[key] = srcValue
+			}
+		}
+		return dstMap
+	}
+	dstItems, dstIsArray := dst.([]any)
+	srcItems, srcIsArray := src.([]any)
+	if dstIsArray && srcIsArray {
+		if len(srcItems) > len(dstItems) {
+			extended := make([]any, len(srcItems))
+			copy(extended, dstItems)
+			dstItems = extended
+		}
+		for i, srcValue := range srcItems {
+			if dstItems[i] == nil {
+				dstItems[i] = srcValue
+			} else {
+				dstItems[i] = mergeProjected(dstItems[i], srcValue)
+			}
+		}
+		return dstItems
+	}
+	return src
+}
+
+func printJSON(v any, pretty bool) {
 	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
+	if pretty {
+		enc.SetIndent("", "  ")
+	}
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
 }
